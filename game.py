@@ -1,8 +1,9 @@
 """Chess movement rules, case generation, and game state updates."""
 
 import random
+from collections import deque
 
-from constants import FILES, QUEENS, SUSPECTS
+from constants import FILES, MOVEMENT_POINTS, QUEENS, RULES_VERSION, SUSPECTS
 
 
 def square(x, y):
@@ -51,9 +52,10 @@ def destinations(piece, start, occupied):
 
 
 def adjacent(a, b):
+    """Interrogation range includes the same square and all eight neighbors."""
     x1, y1 = coords(a)
     x2, y2 = coords(b)
-    return max(abs(x1-x2), abs(y1-y2)) == 1
+    return max(abs(x1-x2), abs(y1-y2)) <= 1
 
 
 def distance(a, b):
@@ -63,6 +65,62 @@ def distance(a, b):
 
 
 ALL_SQUARES = [square(x, y) for y in range(8) for x in range(8)]
+
+
+def shortest_distances(start, occupied, allowed_destinations=()):
+    """Find queen travel costs, allowing turns and charging one per square.
+
+    A queen's route is a sequence of horizontal, vertical, or diagonal steps.
+    Occupied squares block travel. Explicitly allowed occupied destinations can
+    be reached, but cannot be traversed to reach another destination.
+    """
+    occupied = set(occupied)
+    allowed_destinations = set(allowed_destinations)
+    costs = {start: 0}
+    pending = deque([start])
+    while pending:
+        current = pending.popleft()
+        x, y = coords(current)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (dx == dy == 0) or not (0 <= x + dx < 8 and 0 <= y + dy < 8):
+                    continue
+                destination = square(x + dx, y + dy)
+                if destination in costs:
+                    continue
+                if destination in occupied and destination not in allowed_destinations:
+                    continue
+                costs[destination] = costs[current] + 1
+                if destination not in occupied:
+                    pending.append(destination)
+    return costs
+
+
+def interrogation_choices(game, queen, suspect):
+    """Return reachable interrogation squares and their minimum point costs."""
+    if game["revealed"][suspect] >= 3:
+        return []
+    target = position_of(game, suspect)
+    occupied = {position_of(game, name) for name in SUSPECTS}
+    occupied.update(pos for name, pos in game["queens"].items() if name != queen)
+    costs = shortest_distances(game["queens"][queen], occupied, {target})
+    return sorted(
+        ((s, cost) for s, cost in costs.items()
+         if adjacent(s, target) and cost <= game["points"][queen]),
+        key=lambda choice: (choice[1], choice[0]),
+    )
+
+
+def skip_turn(game, queen):
+    """Consume a player's single voluntary skip; reject repeated attempts."""
+    if game["winner"] or queen != QUEENS[game["turn"]] or game["waiting"][queen]:
+        return False
+    if game["skipped"][queen]:
+        return False
+    game["skipped"][queen] = True
+    record(game, f"{queen} skipped.")
+    advance_turn(game)
+    return True
 
 
 def generate_case():
@@ -88,6 +146,11 @@ def generate_case():
                 if name != culprit:
                     occupied.add(murder)
                 opts = destinations(name, new[name], occupied)
+                if stage == 0 and name != culprit:
+                    # After two rewinds, only the culprit may have a legal
+                    # single-move connection to the murder square, even when
+                    # ignoring blockers. Later histories remain unrestricted.
+                    opts = [s for s in opts if not legal_move(name, s, murder)]
                 if not opts:
                     valid = False
                     break
@@ -99,18 +162,19 @@ def generate_case():
             continue
         current = stages[-1]
         free = [s for s in ALL_SQUARES if s not in current.values() and s != murder]
-        if len(free) < 2:
+        if not free:
             continue
-        # Choose different starting squares with reasonable initial access.
-        white = random.choice(free)
-        black = random.choice([s for s in free if s != white])
+        start = random.choice(free)
         histories = {name: [stage[name] for stage in stages] for name in SUSPECTS}
         assert sum(histories[n][0] == murder for n in SUSPECTS) == 1
+        assert [n for n in SUSPECTS if legal_move(n, histories[n][1], murder)] == [culprit]
         return {
+            "rules_version": RULES_VERSION,
             "murder": murder, "culprit": culprit, "histories": histories,
             "revealed": {n: 0 for n in SUSPECTS},
-            "queens": {"White Queen": white, "Black Queen": black},
-            "points": {q: 15 for q in QUEENS},
+            "queens": {q: start for q in QUEENS},
+            "points": {q: MOVEMENT_POINTS for q in QUEENS},
+            "skipped": {q: False for q in QUEENS},
             "round": 1, "turn": 0, "turn_number": 1,
             "waiting": {q: False for q in QUEENS},
             "log": [], "last_reveal": None, "winner": None,
@@ -127,9 +191,9 @@ def advance_turn(game):
     game["turn_number"] += 1
     if all(game["waiting"].values()):
         game["round"] += 1
-        game["points"] = {q: 15 for q in QUEENS}
+        game["points"] = {q: MOVEMENT_POINTS for q in QUEENS}
         game["waiting"] = {q: False for q in QUEENS}
-        game["log"].append(f"Round {game['round']} unlocked: both queens receive 15 new movement points.")
+        game["log"].append(f"Round {game['round']} unlocked: both queens receive {MOVEMENT_POINTS} new movement points.")
 
 
 def record(game, message):

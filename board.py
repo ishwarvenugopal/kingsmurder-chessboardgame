@@ -1,5 +1,8 @@
 """HTML and SVG rendering for investigation boards."""
 
+from collections import defaultdict
+from math import ceil, sqrt
+
 from constants import FILES, GLYPHS
 from game import coords, square
 
@@ -32,12 +35,22 @@ def board_html(positions, murder, start=None, end=None, caption="", compact=Fals
     for i in range(8):
         cells.append(f'<text x="{left+(i+.5)*size}" y="{top+8*size+19}" text-anchor="middle" fill="#e5e7eb" font-size="13">{FILES[i]}</text>')
         cells.append(f'<text x="14" y="{top+(i+.62)*size}" text-anchor="middle" fill="#e5e7eb" font-size="13">{8-i}</text>')
+    grouped = defaultdict(list)
     for name, pos in positions.items():
+        grouped[pos].append(name)
+    for pos, names in grouped.items():
         x, y = coords(pos)
-        px, py = left+(x+.5)*size, top+(7-y+.5)*size
-        is_white = name.startswith("White")
-        fg = "#fffdf2" if is_white else "#171923"
-        stroke = "#242424" if is_white else "#f4f1e9"
-        cells.append(f'<text x="{px}" y="{py+size*.31}" text-anchor="middle" font-size="{size*.76}" font-family="DejaVu Sans,Arial Unicode MS,serif" fill="{fg}" stroke="{stroke}" stroke-width=".9" paint-order="stroke">{GLYPHS[name]}</text>')
+        columns = ceil(sqrt(len(names)))
+        rows = ceil(len(names) / columns)
+        cell_size = size / max(columns, rows)
+        for index, name in enumerate(names):
+            row, column = divmod(index, columns)
+            row_count = min(columns, len(names) - row * columns)
+            px = left + (x + .5)*size + (column - (row_count - 1)/2)*cell_size
+            py = top + (7-y+.5)*size + (row - (rows - 1)/2)*cell_size
+            is_white = name.startswith("White")
+            fg = "#fffdf2" if is_white else "#171923"
+            stroke = "#242424" if is_white else "#f4f1e9"
+            cells.append(f'<text x="{px}" y="{py+cell_size*.31}" text-anchor="middle" font-size="{cell_size*.76}" font-family="DejaVu Sans,Arial Unicode MS,serif" fill="{fg}" stroke="{stroke}" stroke-width=".9" paint-order="stroke"><title>{name}</title>{GLYPHS[name]}</text>')
     svg = f'''<svg viewBox="0 0 {w} {h}" style="width:100%;max-width:{w}px;height:auto;display:block;margin:auto" xmlns="http://www.w3.org/2000/svg"><defs><marker id="arrow" markerWidth="5" markerHeight="5" refX="3" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="#ffb74d"/></marker></defs>{''.join(cells)}{arrows}</svg>'''
     return f'<div style="background:#1b2430;border-radius:12px;padding:10px;text-align:center"><div style="color:#f3f4f6;font-family:sans-serif;font-weight:600;margin:6px">{caption}</div>{svg}</div>'
