@@ -1,0 +1,12 @@
+[project]
+name = "kingsmurder-chessboardgame"
+version = "0.1.0"
+description = "A two-player chessboard detective game built with Streamlit."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.35,<2",
+]
+
+[tool.uv]
+package = false
